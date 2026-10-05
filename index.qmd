@@ -1,5 +1,60 @@
 ---
-title: "index.qmd"
+title: "ST 558 Project 1"
+author: "Brady Sokora"
+date: "10/03/26-10/05/26"
 format: html
 editor: visual
 ---
+
+```{r}
+#| include: false
+library(tidyverse)
+library(httr)
+library(jsonlite)
+library(lubridate)
+```
+
+# Introduction
+
+For this project I'm using the Census PUMS API to pull survey data from 2021 to 2024. I'll write functions to query and clean the data, then summarize and plot it, and finish by looking into something interesting.
+
+# Part 1: Data Processing
+
+## Parsing Variable Values
+
+The API returns codes instead of labels, so this function grabs each year's variable info and keeps just the values for the variables I need. Then I save all four years to an .rds file in my data folder.
+
+```{r}
+# Variables we want to keep
+keep_vars <- c("AGEP", "GASP", "GRPIP", "JWAP", "JWDP", "JWMNP", "PWGTP",
+               "FER", "HHL", "SCH", "SCHL", "SEX", "ST", "STATE",
+               "REGION", "DIVISION")
+
+# Get and parse the variable info for one year
+get_var_list <- function(year) {
+  # build the url for that year
+  url <- paste0("https://api.census.gov/data/", year, "/acs/acs1/pums/variables.json")
+
+  # query and parse the json
+  result <- GET(url)
+  parsed <- fromJSON(rawToChar(result$content))
+
+  # keep only our variables (ST or STATE depending on year)
+  vars <- parsed$variables[intersect(keep_vars, names(parsed$variables))]
+
+  # pull out just the values for each variable
+  lapply(vars, function(x) x$values$item)
+}
+
+# Get one list for each year
+var_lists <- list(
+  "2021" = get_var_list(2021),
+  "2022" = get_var_list(2022),
+  "2023" = get_var_list(2023),
+  "2024" = get_var_list(2024)
+)
+
+# Save to the data folder
+dir.create("data", showWarnings = FALSE)
+saveRDS(var_lists, "data/var_lists.rds")
+```
