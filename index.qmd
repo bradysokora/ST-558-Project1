@@ -58,3 +58,28 @@ var_lists <- list(
 dir.create("data", showWarnings = FALSE)
 saveRDS(var_lists, "data/var_lists.rds")
 ```
+
+## Parsing API Data
+
+Before writing the big function, I want to make sure a basic API call works. This pulls a few variables for North Carolina in 2024, and the helper turns what comes back into a tibble.
+
+```{r}
+# Test call: 2024, a few variables, North Carolina (state 37)
+test_url <- paste0("https://api.census.gov/data/2024/acs/acs1/pums?",
+                   "get=AGEP,PWGTP,SEX&for=state:37&key=", Sys.getenv("CENSUS_KEY"))
+test_result <- GET(test_url)
+
+# Helper to turn what GET() returns into a tibble
+api_to_tibble <- function(result) {
+  # parse the json into a matrix of strings
+  parsed <- fromJSON(rawToChar(result$content))
+
+  # first row holds the column names, the rest is the data
+  colnames(parsed) <- parsed[1, ]
+  as_tibble(parsed[-1, ])
+}
+
+# Try it out
+test_data <- api_to_tibble(test_result)
+test_data
+```
