@@ -249,7 +249,7 @@ ne_2022 <- get_census(year = 2022,
 ne_2022
 ```
 
-Showing the error checks work with a bad year and a bad geography level.
+The NAs in JWAP are people who do not commute, like those who work from home or do not work so they do not have an arrival time. Showing the error checks work with a bad year and a bad geography level.
 
 ```{r}
 # Bad year
@@ -261,7 +261,7 @@ tryCatch(get_census(geo_level = "All"), error = function(e) conditionMessage(e))
 
 ## Combining Years
 
-This function lets me pull more than one year at once. It calls my single year function for each year, adds a year column, and stacks everything into one tibble.
+This function lets me pull more than one year at once. It calls my single year function for each year, adds a year column, and stacks everything into one tibble. The ... lets me pass any of the other options, like the variables or geography, straight through to my single year function
 
 ```{r}
 get_census_years <- function(years = 2024, ...) {
@@ -309,11 +309,11 @@ tryCatch(get_census_years(years = c(2022, 2020)), error = function(e) conditionM
 
 # Part 2: Summarizing the Data
 
-Each row in the data doesn't stand for just one person. PWGTP says how many people that row represents, so all of my summaries use it as a weight.
+Each row in the data doesn't stand for just one person. PWGTP says how many people that row represents, so all of my summaries use it as a weight. Since my tibbles have the census class, R will use my own versions of summary() and plot() whenever I call them on this data.
 
 ## Numeric Summaries
 
-This is my own summary function for the census class. By default it gives the weighted mean and standard deviation for every numeric variable (except PWGTP and the time variables) and weighted counts for every categorical variable, including year. The user can also pick which variables to summarize.
+This is my own summary function for the census class. By default it gives the weighted mean and standard deviation for every numeric variable (except PWGTP and the time variables) and weighted counts for every categorical variable, including year. The user can also pick which variables to summarize. 
 
 ```{r}
 summary.census <- function(object, num_vars = NULL, cat_vars = NULL, ...) {
@@ -507,6 +507,6 @@ More men commute than women, about 9.2 million compared to 8 million across the 
 
 # Conclusion
 
-For this project I built functions to pull Census PUMS data straight from the API, clean it up into a tibble with real labels and times, and combine multiple years. Then I wrote my own summary and plot functions for the census class so summary() and plot() just work on the data.
+For this project I built functions to pull Census PUMS data straight from the API, clean it up into a tibble with real labels and times, and combine multiple years. Then I wrote my own summary and plot functions for the census class so summary() and plot() just work on the data. 
 
-Using those functions on North Carolina, I found that commuting has slowly come back since 2021. The share of people commuting rose from about 37.6% to 41.2%, and the average commute for people who do commute went from 24.6 to 25.8 minutes. The changes are small, but they all point the same way, which lines up with more people going back to the office after COVID.One thing to keep in mind is that JWMNP doesn't separate working from home from not working at all, so some of this change could also come from more people having jobs.
+Using those functions on North Carolina, I found that commuting has slowly come back since 2021. The share of people commuting rose from about 37.6% to 41.2%, and the average commute for people who do commute went from 24.6 to 25.8 minutes. The changes are small, but they all point the same way, which lines up with more people going back to the office after COVID. One thing to keep in mind is that JWMNP doesn't separate working from home from not working at all, so some of this change could also come from more people having jobs. 
