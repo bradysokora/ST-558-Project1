@@ -32,7 +32,7 @@ keep_vars <- c("AGEP", "GASP", "GRPIP", "JWAP", "JWDP", "JWMNP", "PWGTP",
 
 # Get and parse the variable info for one year
 get_var_list <- function(year) {
-  # build the url for that year
+  # build the URL for that year
   url <- paste0("https://api.census.gov/data/", year, "/acs/acs1/pums/variables.json")
 
   # query and parse the json
@@ -379,7 +379,7 @@ tryCatch(summary(nc_2024, num_vars = "GASP"), error = function(e) conditionMessa
 
 ## Graphical Summaries
 
-This is my own plot function for the census class. The user picks one categorical variable (year works too) and one numeric variable, and it makes a boxplot of the numeric variable across the categories. Using PWGTP as the weight means rows that stand for more people count more in the plot.
+This is my own plot function for the census class. The user picks one categorical variable (year works too) and one numeric variable, and it makes a box plot of the numeric variable across the categories. Using PWGTP as the weight means rows that stand for more people count more in the plot.
 
 ```{r}
 plot.census <- function(x, cat_var, num_var, ...) {
@@ -401,7 +401,7 @@ plot.census <- function(x, cat_var, num_var, ...) {
   # drop rows missing the numeric variable
   plot_data <- x[!is.na(x[[num_var]]), ]
 
-  # weighted boxplot of the numeric variable by category
+  # weighted box plot of the numeric variable by category
   ggplot(plot_data, aes(x = get(cat_var), y = get(num_var), weight = PWGTP)) +
     geom_boxplot() +
     labs(x = cat_var, y = num_var,
@@ -429,3 +429,80 @@ Showing it catches a numeric variable put in the categorical spot.
 tryCatch(plot(nc_2024, cat_var = "AGEP", num_var = "SEX"), error = function(e) conditionMessage(e))
 ```
 
+# Investigation: Did Commutes Change from 2021 to 2024?
+
+In 2021 a lot of people were still working from home because of COVID. I want to see if that shows up in North Carolina's data, and whether commutes look different now that more people are back in the office. I'll look at how many people commute each year, how long their commutes are, and what time they get to work.
+
+First I pull all four years for North Carolina with travel time, arrival time, and sex.
+
+```{r}
+# All four years for NC
+nc_commute <- get_census_years(years = 2021:2024,
+                               num_vars = c("JWMNP", "JWAP"),
+                               cat_vars = "SEX")
+
+# Weighted counts by year to make sure everything came in
+summary(nc_commute, num_vars = "JWMNP", cat_vars = "year")
+```
+
+JWMNP is 0 for anyone who doesn't commute, which includes people working from home and people not working at all. So before comparing commute times, I check what share of all people commuted each year.
+
+```{r}
+# Weighted share of people with a commute, by year
+commuted <- nc_commute$JWMNP > 0
+share_commuting <- tapply(nc_commute$PWGTP * commuted, nc_commute$year, sum) /
+  tapply(nc_commute$PWGTP, nc_commute$year, sum)
+round(share_commuting, 3)
+```
+
+The share of people commuting goes up every year, from about 37.6% in 2021 to 41.2% in 2024. That fits with people slowly heading back to the office after COVID.
+
+Now I keep only the people who actually commute, so the zeros don't drag the averages down.
+
+```{r}
+# Just commuters
+commuters <- nc_commute[nc_commute$JWMNP > 0, ]
+
+# keep the census class so my summary and plot functions still work
+class(commuters) <- unique(c("census", class(commuters)))
+
+# Average commute time and number of commuters by year
+summary(commuters, num_vars = "JWMNP", cat_vars = "year")
+```
+
+For people who commute, the average trip is about 25 minutes, way more than the 10 minutes I got when the zeros were included. The number of commuters also grew from about 4 million to about 4.6 million.
+
+My summary function gives one mean for the whole data, so to compare years I run it on each year separately.
+
+```{r}
+# Average commute time for each year
+mean_by_year <- sapply(levels(commuters$year), function(y) {
+  one_year <- commuters[commuters$year == y, ]
+  class(one_year) <- unique(c("census", class(one_year)))
+  summary(one_year, num_vars = "JWMNP", cat_vars = "SEX")$JWMNP_mean
+})
+round(mean_by_year, 1)
+```
+
+Plotting commute length and arrival time across the four years.
+
+```{r}
+# Commute length by year
+plot(commuters, cat_var = "year", num_var = "JWMNP")
+
+# Arrival time at work by year
+plot(commuters, cat_var = "year", num_var = "JWAP")
+```
+The median commute sits right around 20 minutes every year, so the typical trip didn't really change. The small rise in the average seems to come from the longer trips, since 2024 has more commutes in the 100 to 110 minute range and its box starts a little higher. Arrival times look almost the same every year, with most people getting to work between about 7 and 9 in the morning.
+
+Last, I check whether men and women have different commutes.
+
+```{r}
+# Commute length by sex
+summary(commuters, num_vars = "JWMNP", cat_vars = "SEX")
+plot(commuters, cat_var = "SEX", num_var = "JWMNP")
+```
+
+More men commute than women, about 9.2 million compared to 8 million across the four years combined. Both have a median commute of about 20 minutes, but the bottom of the women's box is a little lower, so women are a bit more likely to have shorter trips.
+
+# Conclusion
