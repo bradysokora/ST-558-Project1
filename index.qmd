@@ -83,3 +83,226 @@ api_to_tibble <- function(result) {
 test_data <- api_to_tibble(test_result)
 test_data
 ```
+
+## Helper Functions for Cleaning
+
+The API gives back codes as text, so I need a few helpers. The time ones turn JWAP and JWDP codes into the middle of their time range, and the last one turns categorical codes into labeled factors using my .rds file.
+
+```{r}
+# Turn one time range string like "7:00 a.m. to 7:04 a.m." into its midpoint
+get_mid_time <- function(time_string) {
+  # missing values or labels that aren't time ranges become NA
+  if (is.na(time_string) || !str_detect(time_string, " to ")) {
+    return(hms::as_hms(NA_real_))
+  }
+
+  # swap a.m. and p.m. for AM and PM so lubridate can read them
+  clean <- time_string |>
+    str_replace_all("a\\.m\\.", "AM") |>
+    str_replace_all("p\\.m\\.", "PM")
+
+  # split into the start and end times
+  parts <- str_split(clean, " to ")[[1]] |> str_trim()
+
+  # parse both as clock times
+  times <- parse_date_time(parts, orders = "I:M p")
+
+  # seconds since midnight for each end
+  secs <- hour(times) * 3600 + minute(times) * 60
+
+  # if the range crosses midnight, push the end into the next day
+  if (secs[2] < secs[1]) secs[2] <- secs[2] + 86400
+
+  # midpoint, wrapped back into a single day
+  hms::as_hms(mean(secs) %% 86400)
+}
+
+# Convert a whole column of JWAP or JWDP codes into midpoint times
+convert_time_codes <- function(codes, value_list) {
+  # lookup of code to label, matching codes as numbers so "001" and "1" line up
+  lookup <- unlist(value_list)
+  keys <- suppressWarnings(as.numeric(names(lookup)))
+
+  # find the midpoint for each possible label just once
+  mids <- map_dbl(lookup, \(x) as.numeric(get_mid_time(x)))
+
+  # match each code to its midpoint and return as a time column
+  hms::as_hms(unname(mids[match(suppressWarnings(as.numeric(codes)), keys)]))
+}
+
+# Convert a column of categorical codes into a labeled factor
+convert_cat_codes <- function(codes, value_list) {
+  # lookup of code to label, matching codes as numbers
+  lookup <- unlist(value_list)
+  keys <- suppressWarnings(as.numeric(names(lookup)))
+
+  # label for each code
+  labels <- lookup[match(suppressWarnings(as.numeric(codes)), keys)]
+
+  # factor with levels in code order
+  factor(unname(labels), levels = unique(unname(lookup[order(keys)])))
+}
+
+# Quick check that the midpoint helper works on one value
+get_mid_time("7:00 a.m. to 7:04 a.m.")
+```
+
+## Querying One Year
+
+Now the main function. It checks everything the user gives it, builds the URL, gets the data, and cleans up the columns before returning a tibble with the census class.
+
+```{r}
+get_census <- function(year = 2024,
+                       num_vars = c("AGEP", "PWGTP"),
+                       cat_vars = "SEX",
+                       geo_level = "State",
+                       geo_value = NULL) {
+
+  # year has to be a single valid value
+  if (length(year) != 1 || !(year %in% 2021:2024)) {
+    stop("year must be one of 2021, 2022, 2023, or 2024")
+  }
+
+  # numeric variables: PWGTP always included, plus at least one other
+  num_options <- c("AGEP", "GASP", "GRPIP", "JWAP", "JWDP", "JWMNP")
+  num_vars <- unique(c("PWGTP", num_vars))
+  if (!all(num_vars %in% c("PWGTP", num_options))) {
+    stop("numeric variables must come from: ", paste(num_options, collapse = ", "))
+  }
+  if (length(setdiff(num_vars, "PWGTP")) < 1) {
+    stop("you need at least one numeric variable besides PWGTP")
+  }
+
+  # categorical variables: at least one, from the allowed list
+  cat_options <- c("FER", "HHL", "SCH", "SCHL", "SEX")
+  if (length(cat_vars) < 1 || !all(cat_vars %in% cat_options)) {
+    stop("categorical variables must come from: ", paste(cat_options, collapse = ", "))
+  }
+
+  # geography level: just one of Region, Division, or State
+  if (length(geo_level) != 1 || !(geo_level %in% c("Region", "Division", "State"))) {
+    stop("geo_level must be one of Region, Division, or State")
+  }
+
+  # variable info for this year
+  vars_year <- readRDS("data/var_lists.rds")[[as.character(year)]]
+
+  # state variable name changed in 2023
+  state_var <- if (year %in% 2021:2022) "ST" else "STATE"
+  geo_var <- switch(geo_level, Region = "REGION", Division = "DIVISION", State = state_var)
+
+  # defaults if no specific geography given (kept small so it runs fast)
+  if (is.null(geo_value)) {
+    geo_value <- switch(geo_level, Region = "1", Division = "1", State = "37")
+  }
+
+  # check the geography values against the .rds file, "all" is allowed
+  get_all <- length(geo_value) == 1 && tolower(geo_value) == "all"
+  if (!get_all && !all(geo_value %in% names(vars_year[[geo_var]]))) {
+    stop("geo_value has a code that isn't valid for ", geo_level, " in ", year)
+  }
+
+  # build the url
+  geo_string <- if (get_all) "*" else paste(geo_value, collapse = ",")
+  url <- paste0("https://api.census.gov/data/", year, "/acs/acs1/pums?get=",
+                paste(c(num_vars, cat_vars), collapse = ","),
+                "&for=", tolower(geo_level), ":", geo_string,
+                "&key=", Sys.getenv("CENSUS_KEY"))
+
+  # query and turn into a tibble
+  census_data <- api_to_tibble(GET(url))
+
+  # plain numeric variables to numbers
+  for (v in setdiff(num_vars, c("JWAP", "JWDP"))) {
+    census_data[[v]] <- as.numeric(census_data[[v]])
+  }
+
+  # time variables to midpoint times
+  for (v in intersect(num_vars, c("JWAP", "JWDP"))) {
+    census_data[[v]] <- convert_time_codes(census_data[[v]], vars_year[[v]])
+  }
+
+  # categorical variables to labeled factors
+  for (v in cat_vars) {
+    census_data[[v]] <- convert_cat_codes(census_data[[v]], vars_year[[v]])
+  }
+
+  # add the census class
+  class(census_data) <- c("census", class(census_data))
+  census_data
+}
+```
+
+Trying it with the defaults, and then with some different choices.
+
+```{r}
+# Defaults: 2024, AGEP and SEX for North Carolina
+nc_2024 <- get_census()
+nc_2024
+
+# Travel time and arrival time by school enrollment for New England in 2022
+ne_2022 <- get_census(year = 2022,
+                      num_vars = c("JWMNP", "JWAP"),
+                      cat_vars = c("SCH", "SEX"),
+                      geo_level = "Division",
+                      geo_value = "1")
+ne_2022
+```
+
+Showing the error checks work with a bad year and a bad geography level.
+
+```{r}
+# Bad year
+tryCatch(get_census(year = 2019), error = function(e) conditionMessage(e))
+
+# Bad geography level
+tryCatch(get_census(geo_level = "All"), error = function(e) conditionMessage(e))
+```
+
+## Combining Years
+
+This function lets me pull more than one year at once. It calls my single year function for each year, adds a year column, and stacks everything into one tibble.
+
+```{r}
+get_census_years <- function(years = 2024, ...) {
+  # every year has to be valid
+  if (length(years) < 1 || !all(years %in% 2021:2024)) {
+    stop("years must come from 2021, 2022, 2023, and 2024")
+  }
+
+  # get each year and tag it with a year column
+  year_list <- lapply(years, function(y) {
+    one_year <- get_census(year = y, ...)
+    one_year$year <- y
+    # drop the census class so bind_rows works cleanly
+    class(one_year) <- setdiff(class(one_year), "census")
+    one_year
+  })
+
+  # stack the years together and make year categorical
+  combined <- bind_rows(year_list)
+  combined$year <- factor(combined$year)
+
+  # add the census class back
+  class(combined) <- c("census", class(combined))
+  combined
+}
+```
+
+Trying it with two years for North Carolina, using age and travel time.
+
+```{r}
+nc_years <- get_census_years(years = c(2021, 2024),
+                             num_vars = c("AGEP", "JWMNP"),
+                             cat_vars = "SEX")
+nc_years
+
+# Quick check that both years made it in
+table(nc_years$year)
+```
+
+Showing it catches a bad year in the list.
+
+```{r}
+tryCatch(get_census_years(years = c(2022, 2020)), error = function(e) conditionMessage(e))
+```
