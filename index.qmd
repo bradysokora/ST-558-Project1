@@ -376,3 +376,56 @@ Showing it catches a variable that isn't in the data.
 ```{r}
 tryCatch(summary(nc_2024, num_vars = "GASP"), error = function(e) conditionMessage(e))
 ```
+
+## Graphical Summaries
+
+This is my own plot function for the census class. The user picks one categorical variable (year works too) and one numeric variable, and it makes a boxplot of the numeric variable across the categories. Using PWGTP as the weight means rows that stand for more people count more in the plot.
+
+```{r}
+plot.census <- function(x, cat_var, num_var, ...) {
+  # both variables are required, one of each
+  if (missing(cat_var) || missing(num_var) || length(cat_var) != 1 || length(num_var) != 1) {
+    stop("give exactly one categorical variable and one numeric variable")
+  }
+  
+  # categorical variable has to be a factor column in the data
+  if (!(cat_var %in% names(x)) || !is.factor(x[[cat_var]])) {
+    stop(cat_var, " isn't a categorical variable in this data")
+  }
+
+  # numeric variable has to be a number (or time) column in the data
+  if (!(num_var %in% names(x)) || !(is.numeric(x[[num_var]]) || inherits(x[[num_var]], "hms"))) {
+    stop(num_var, " isn't a numeric variable in this data")
+  }
+
+  # drop rows missing the numeric variable
+  plot_data <- x[!is.na(x[[num_var]]), ]
+
+  # weighted boxplot of the numeric variable by category
+  ggplot(plot_data, aes(x = get(cat_var), y = get(num_var), weight = PWGTP)) +
+    geom_boxplot() +
+    labs(x = cat_var, y = num_var,
+         title = paste(num_var, "by", cat_var)) +
+    theme(axis.text.x = element_text(angle = 20, hjust = 1))
+}
+```
+
+Trying it a few different ways: age by year in North Carolina, commute time by school enrollment in New England, and arrival time by sex.
+
+```{r}
+# Age across the two years
+plot(nc_years, cat_var = "year", num_var = "AGEP")
+
+# Travel time by school enrollment
+plot(ne_2022, cat_var = "SCH", num_var = "JWMNP")
+
+# Arrival time at work by sex
+plot(ne_2022, cat_var = "SEX", num_var = "JWAP")
+```
+
+Showing it catches a numeric variable put in the categorical spot.
+
+```{r}
+tryCatch(plot(nc_2024, cat_var = "AGEP", num_var = "SEX"), error = function(e) conditionMessage(e))
+```
+
