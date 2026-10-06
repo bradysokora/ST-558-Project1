@@ -506,3 +506,7 @@ plot(commuters, cat_var = "SEX", num_var = "JWMNP")
 More men commute than women, about 9.2 million compared to 8 million across the four years combined. Both have a median commute of about 20 minutes, but the bottom of the women's box is a little lower, so women are a bit more likely to have shorter trips.
 
 # Conclusion
+
+For this project I built functions to pull Census PUMS data straight from the API, clean it up into a tibble with real labels and times, and combine multiple years. Then I wrote my own summary and plot functions for the census class so summary() and plot() just work on the data.
+
+Using those functions on North Carolina, I found that commuting has slowly come back since 2021. The share of people commuting rose from about 37.6% to 41.2%, and the average commute for people who do commute went from 24.6 to 25.8 minutes. The changes are small, but they all point the same way, which lines up with more people going back to the office after COVID.One thing to keep in mind is that JWMNP doesn't separate working from home from not working at all, so some of this change could also come from more people having jobs.
