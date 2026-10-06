@@ -306,3 +306,73 @@ Showing it catches a bad year in the list.
 ```{r}
 tryCatch(get_census_years(years = c(2022, 2020)), error = function(e) conditionMessage(e))
 ```
+
+# Part 2: Summarizing the Data
+
+Each row in the data doesn't stand for just one person. PWGTP says how many people that row represents, so all of my summaries use it as a weight.
+
+## Numeric Summaries
+
+This is my own summary function for the census class. By default it gives the weighted mean and standard deviation for every numeric variable (except PWGTP and the time variables) and weighted counts for every categorical variable, including year. The user can also pick which variables to summarize.
+
+```{r}
+summary.census <- function(object, num_vars = NULL, cat_vars = NULL, ...) {
+  # the weight for every row
+  weights <- object$PWGTP
+
+  # default numeric variables: all numeric columns except the weight and time variables
+  if (is.null(num_vars)) {
+    num_vars <- names(object)[sapply(object, is.numeric)]
+    num_vars <- setdiff(num_vars, c("PWGTP", "JWAP", "JWDP"))
+  }
+
+  # default categorical variables: all factor columns (this includes year)
+  if (is.null(cat_vars)) {
+    cat_vars <- names(object)[sapply(object, is.factor)]
+  }
+
+  # make sure the variables actually exist in the data
+  if (!all(c(num_vars, cat_vars) %in% names(object))) {
+    stop("some of those variables aren't in this data")
+  }
+
+  results <- list()
+
+  # weighted mean and sd for each numeric variable
+  for (v in num_vars) {
+    # drop missing values along with their weights
+    keep <- !is.na(object[[v]])
+    x <- object[[v]][keep]
+    w <- weights[keep]
+
+    sample_mean <- sum(x * w) / sum(w)
+    sample_sd <- sqrt(sum(x^2 * w) / sum(w) - sample_mean^2)
+
+    results[[paste0(v, "_mean")]] <- sample_mean
+    results[[paste0(v, "_sd")]] <- sample_sd
+  }
+
+  # weighted counts for each categorical variable
+  for (v in cat_vars) {
+    results[[paste0(v, "_counts")]] <- tapply(weights, object[[v]], sum, default = 0)
+  }
+
+  results
+}
+```
+
+Using it with the defaults on my two year North Carolina data, and then picking specific variables from the New England data.
+
+```{r}
+# Defaults: everything numeric and categorical
+summary(nc_years)
+
+# Just travel time and school enrollment
+summary(ne_2022, num_vars = "JWMNP", cat_vars = "SCH")
+```
+
+Showing it catches a variable that isn't in the data.
+
+```{r}
+tryCatch(summary(nc_2024, num_vars = "GASP"), error = function(e) conditionMessage(e))
+```
